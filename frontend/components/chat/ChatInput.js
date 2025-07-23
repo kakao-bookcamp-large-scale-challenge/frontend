@@ -98,6 +98,8 @@ const ChatInput = forwardRef(({
   const handleSubmit = useCallback(async (e) => {
     e?.preventDefault();
 
+    
+
     if (files.length > 0) {
       try {
         const file = files[0];
@@ -344,6 +346,11 @@ const ChatInput = forwardRef(({
       }
     } else if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      // 한글 등 조합 언어인 경우, 조합 중일 경우 이벤트 차단
+      if (e.nativeEvent.isComposing) {
+        return;
+      }
+      
       if (message.trim() || files.length > 0) {
         handleSubmit(e);
       }
