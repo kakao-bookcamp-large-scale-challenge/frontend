@@ -280,6 +280,9 @@ const ChatMessages = ({
   const loadingTimeoutRef = useRef(null);
   const scrollHandler = useRef(new ScrollHandler(containerRef));
 
+  console.log("messages: ",messages);
+  
+
   const logDebug = useCallback((action, data) => {
     console.debug(`[ChatMessages] ${action}:`, {
       ...data,
