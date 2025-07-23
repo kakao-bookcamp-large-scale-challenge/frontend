@@ -1,15 +1,15 @@
 # Node.js dependencies
-node_modules/
+**/node_modules/
 dist/
 build/
 .npmrc
-.env.local
-.env
-backend/uploads
+# 모든 위치의 환경변수 파일 무시
+**/.env
+**/.env.local
 
 # Next.js
 .next/
-out/
+./frontend/out/
 
 test-results/
 
