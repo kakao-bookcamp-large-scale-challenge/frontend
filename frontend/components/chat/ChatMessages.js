@@ -418,11 +418,18 @@ const ChatMessages = ({
       onReactionRemove
     };
 
+    console.log("✅msg.type:",msg.type);
+    
+    
+
     const MessageComponent = {
       system: SystemMessage,
       file: FileMessage,
       ai: AIMessage
     }[msg.type] || UserMessage;
+    if(msg.type === "file") {
+      console.log("✅msg.component:",MessageComponent);
+    }
 
     return (
       <MessageComponent

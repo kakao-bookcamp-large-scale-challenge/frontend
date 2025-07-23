@@ -5,8 +5,8 @@ import {
   MovieIcon as Film, 
   CorrectOutlineIcon as CheckCheck, 
   CorrectOutlineIcon as Check, 
-  MusicIcon as Music, 
-  ExternalLinkIcon as ExternalLink, 
+  SoundOnIcon,
+  OpenInNewOutlineIcon,
   DownloadIcon as Download,
   ErrorCircleIcon as AlertCircle 
 } from '@vapor-ui/icons';
@@ -63,7 +63,7 @@ const FileMessage = ({
 
     if (mimetype.startsWith('image/')) return <Image {...iconProps} color="#00C853" />;
     if (mimetype.startsWith('video/')) return <Film {...iconProps} color="#2196F3" />;
-    if (mimetype.startsWith('audio/')) return <Music {...iconProps} color="#9C27B0" />;
+    if (mimetype.startsWith('audio/')) return <SoundOnIcon {...iconProps} color="#9C27B0" />;
     return <FileText {...iconProps} color="#ffffff" />;
   };
 
@@ -212,6 +212,9 @@ const FileMessage = ({
     const mimetype = msg.file?.mimetype || '';
     const originalname = getDecodedFilename(msg.file?.originalname || 'Unknown File');
     const size = fileService.formatFileSize(msg.file?.size || 0);
+
+    console.log("✅",mimetype,originalname,size);
+    
     
     const FileActions = () => (
       <div className="file-actions mt-2 pt-2 border-t border-gray-200">
@@ -221,7 +224,7 @@ const FileMessage = ({
           onClick={handleViewInNewTab}
           title="새 탭에서 보기"
         >
-          <ExternalLink size={16} />
+          <OpenInNewOutlineIcon size={16} />
           <span>새 탭에서 보기</span>
         </Button>
         <Button
@@ -340,6 +343,7 @@ const FileMessage = ({
           </span>
         </div>
         <div className={`message-bubble ${isMine ? 'message-mine' : 'message-other'} last file-message`}>
+
           <div className="message-content">
             {error && (
               <Callout color="danger" className="mb-3 d-flex align-items-center">
@@ -352,7 +356,7 @@ const FileMessage = ({
                   aria-label="Close"
                   onClick={() => setError(null)}
                 >
-                  ×
+                  x
                 </Button>
               </Callout>
             )}
@@ -363,6 +367,7 @@ const FileMessage = ({
               </div>
             )}
           </div>
+          
           <div className="message-footer">
             <div 
               className="message-time mr-3" 
