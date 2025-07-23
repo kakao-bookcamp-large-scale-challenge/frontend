@@ -163,6 +163,7 @@ const MessageContent = ({ content, isAI = false }) => {
         child.tagName === 'input' && 
         child.properties.type === 'checkbox'
       );
+      
 
       return (
         <li 
