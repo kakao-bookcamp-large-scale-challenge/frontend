@@ -502,8 +502,17 @@ body {
   padding-left: var(--vapor-space-300);
 }
 
+
 .message-content .md-list-item, .message-content .task-list-item {
   margin: var(--vapor-space-050) 0;
+}
+
+.message-content .md-list.md-ul {
+  list-style-type: disc;
+}
+
+.message-content .md-list.md-ol {
+  list-style-type: decimal;
 }
 
 /* Code blocks */
