@@ -2,6 +2,8 @@
   "name": "bootcampchat",
   "version": "1.0.0",
   "description": "Real-time chat application",
+  "author": "",
+  "license": "ISC",
   "scripts": {
     "setup": "npm run setup:e2e && npm run setup:frontend",
     "setup:e2e": "cd e2e && npm install",
@@ -10,13 +12,5 @@
     "build": "cd frontend && npm run build",
     "start": "cd frontend && npm run start",
     "test": "cd e2e && npm test"
-  },
-  "devDependencies": {
-    "concurrently": "^8.2.2"
-  },
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "@vapor-ui/core": "^0.3.1"
   }
 }
