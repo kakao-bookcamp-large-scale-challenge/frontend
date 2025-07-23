@@ -367,20 +367,23 @@ const ChatInput = forwardRef(({
 
   const handleMarkdownAction = useCallback((markdown) => {
     if (!messageInputRef?.current) return;
-
+  
     const input = messageInputRef.current;
     const start = input.selectionStart;
     const end = input.selectionEnd;
     const selectedText = message.substring(start, end);
+  
     let newText;
     let newCursorPos;
     let newSelectionStart;
     let newSelectionEnd;
-
+  
     if (markdown.includes('\n')) {
+      // 멀티라인 마크다운 (예: ``` ```)
       newText = message.substring(0, start) +
                 markdown.replace('\n\n', '\n' + selectedText + '\n') +
                 message.substring(end);
+  
       if (selectedText) {
         newSelectionStart = start + markdown.split('\n')[0].length + 1;
         newSelectionEnd = newSelectionStart + selectedText.length;
@@ -390,40 +393,47 @@ const ChatInput = forwardRef(({
         newSelectionStart = newCursorPos;
         newSelectionEnd = newCursorPos;
       }
+  
     } else if (markdown.endsWith(' ')) {
+      // 접두어 마크다운 (예: - , 1. )
       newText = message.substring(0, start) +
                 markdown + selectedText +
                 message.substring(end);
+  
       newCursorPos = start + markdown.length + selectedText.length;
       newSelectionStart = newCursorPos;
       newSelectionEnd = newCursorPos;
+  
     } else {
-      newText = message.substring(0, start) +
-                markdown + selectedText + markdown +
-                message.substring(end);
+      // 양쪽 감싸기 마크다운 (예: **bold**, [](url))
       if (selectedText) {
+        newText = message.substring(0, start) +
+                  markdown + selectedText + markdown +
+                  message.substring(end);
+  
         newSelectionStart = start + markdown.length;
         newSelectionEnd = newSelectionStart + selectedText.length;
+        newCursorPos = newSelectionEnd;
       } else {
-        newSelectionStart = start + markdown.length;
-        newSelectionEnd = newSelectionStart;
+        newText = message.substring(0, start) +
+                  markdown +
+                  message.substring(end);
+  
+        newCursorPos = start + markdown.length;
+        newSelectionStart = newCursorPos;
+        newSelectionEnd = newCursorPos;
       }
-      newCursorPos = newSelectionEnd;
     }
-
+  
     setMessage(newText);
-
+  
     setTimeout(() => {
       if (messageInputRef.current) {
         input.focus();
         input.setSelectionRange(newSelectionStart, newSelectionEnd);
-        if (selectedText) {
-          input.setSelectionRange(newCursorPos, newCursorPos);
-        }
       }
     }, 0);
   }, [message, setMessage, messageInputRef]);
-
   const handleEmojiSelect = useCallback((emoji) => {
     if (!messageInputRef?.current) return;
 
