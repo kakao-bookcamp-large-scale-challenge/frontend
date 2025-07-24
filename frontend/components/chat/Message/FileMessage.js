@@ -397,6 +397,7 @@ const FileMessage = ({
           onMessageDelete={onMessageDelete}
           isMine={isMine}
           room={room}
+          messageRef={msg}
         />        
       </div>
     </div>
