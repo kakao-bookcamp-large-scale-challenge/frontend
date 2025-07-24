@@ -16,7 +16,6 @@ import MessageContent from './MessageContent';
 import MessageActions from './MessageActions';
 import ReadStatus from '../ReadStatus';
 import fileService from '../../../services/fileService';
-import authService from '../../../services/authService';
 
 const FileMessage = ({ 
   msg = {}, 
@@ -33,12 +32,27 @@ const FileMessage = ({
 
   useEffect(() => {
     if (msg?.file) {
-      const url = fileService.getPreviewUrl(msg.file, true);
-      setPreviewUrl(url);
-      console.debug('Preview URL generated:', {
+      console.log('FileMessage - File data received:', {
+        fileData: msg.file,
+        s3Key: msg.file.s3Key,
         filename: msg.file.filename,
-        url
+        url: msg.file.url,
+        storageType: msg.file.storageType
       });
+
+      // S3 파일인 경우 직접 URL 사용, 로컬 파일인 경우 API URL 사용
+      if (msg.file.storageType === 's3' && msg.file.url) {
+        console.log('Using direct S3 URL:', msg.file.url);
+        setPreviewUrl(msg.file.url);
+      } else if (msg.file.path) {
+        console.log('Using file path URL:', msg.file.path);
+        setPreviewUrl(msg.file.path);
+      } else {
+        // 레거시 방식: API를 통한 파일 접근
+        const apiUrl = `/api/files/view/${msg.file.filename}`;
+        console.log('Using API URL:', apiUrl);
+        setPreviewUrl(apiUrl);
+      }
     }
   }, [msg?.file]);
 
@@ -67,11 +81,23 @@ const FileMessage = ({
     return <FileText {...iconProps} color="#ffffff" />;
   };
 
-  const getDecodedFilename = (encodedFilename) => {
+  const getDecodedFilename = (filename) => {
     try {
-      if (!encodedFilename) return 'Unknown File';
+      if (!filename) return 'Unknown File';
       
-      const base64 = encodedFilename
+      // S3 key에서 파일명 추출 (폴더/timestamp-uuid.ext 형식)
+      if (filename.includes('/')) {
+        const parts = filename.split('/');
+        const filenameWithUuid = parts[parts.length - 1];
+        // timestamp-uuid.ext에서 확장자만 유지하고 원본 이름 사용
+        if (msg.file.originalname) {
+          return msg.file.originalname;
+        }
+        return filenameWithUuid;
+      }
+
+      // 기존 방식 유지 (하위 호환성)
+      const base64 = filename
         .replace(/-/g, '+')
         .replace(/_/g, '/');
       
@@ -82,10 +108,10 @@ const FileMessage = ({
         return Buffer.from(paddedBase64, 'base64').toString('utf8');
       }
 
-      return decodeURIComponent(encodedFilename);
+      return decodeURIComponent(filename);
     } catch (error) {
       console.error('Filename decoding error:', error);
-      return encodedFilename;
+      return msg.file.originalname || filename;
     }
   };
 
@@ -104,24 +130,16 @@ const FileMessage = ({
     setError(null);
     
     try {
-      if (!msg.file?.filename) {
+      const s3Key = msg.file.s3Key || msg.file.filename;
+      if (!s3Key) {
         throw new Error('파일 정보가 없습니다.');
       }
 
-      const user = authService.getCurrentUser();
-      if (!user?.token || !user?.sessionId) {
-        throw new Error('인증 정보가 없습니다.');
+      const result = await fileService.downloadFile(s3Key, msg.file.originalname);
+      
+      if (!result.success) {
+        throw new Error(result.message);
       }
-
-      const baseUrl = fileService.getFileUrl(msg.file.filename, false);
-      const authenticatedUrl = `${baseUrl}?token=${encodeURIComponent(user.token)}&sessionId=${encodeURIComponent(user.sessionId)}&download=true`;
-
-      const link = document.createElement('a');
-      link.href = authenticatedUrl;
-      link.download = getDecodedFilename(msg.file.originalname);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
 
     } catch (error) {
       console.error('File download error:', error);
@@ -135,23 +153,16 @@ const FileMessage = ({
     setError(null);
 
     try {
-      if (!msg.file?.filename) {
+      const s3Key = msg.file.s3Key || msg.file.filename;
+      if (!s3Key) {
         throw new Error('파일 정보가 없습니다.');
       }
 
-      const user = authService.getCurrentUser();
-      if (!user?.token || !user?.sessionId) {
-        throw new Error('인증 정보가 없습니다.');
+      const result = fileService.openInNewTab(s3Key);
+      
+      if (!result.success) {
+        throw new Error(result.message);
       }
-
-      const baseUrl = fileService.getFileUrl(msg.file.filename, true);
-      const authenticatedUrl = `${baseUrl}?token=${encodeURIComponent(user.token)}&sessionId=${encodeURIComponent(user.sessionId)}`;
-
-      const newWindow = window.open(authenticatedUrl, '_blank');
-      if (!newWindow) {
-        throw new Error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
-      }
-      newWindow.opener = null;
     } catch (error) {
       console.error('File view error:', error);
       setError(error.message || '파일 보기 중 오류가 발생했습니다.');
@@ -160,20 +171,13 @@ const FileMessage = ({
 
   const renderImagePreview = (originalname) => {
     try {
-      if (!msg?.file?.filename) {
+      if (!previewUrl) {
         return (
           <div className="flex items-center justify-center h-full bg-gray-100">
             <Image className="w-8 h-8 text-gray-400" />
           </div>
         );
       }
-
-      const user = authService.getCurrentUser();
-      if (!user?.token || !user?.sessionId) {
-        throw new Error('인증 정보가 없습니다.');
-      }
-
-      const previewUrl = fileService.getPreviewUrl(msg.file, true);
 
       return (
         <div className="bg-transparent-pattern">
@@ -186,14 +190,18 @@ const FileMessage = ({
             }}
             onError={(e) => {
               console.error('Image load error:', {
-                error: e.error,
-                originalname
+                src: e.target.src,
+                previewUrl,
+                originalname,
+                fileData: msg.file,
+                error: e.error
               });
               e.target.onerror = null; 
               e.target.src = '/images/placeholder-image.png';
-              setError('이미지를 불러올 수 없습니다.');
+              setError(`이미지를 불러올 수 없습니다. URL: ${previewUrl}`);
             }}
             loading="lazy"
+            crossOrigin="anonymous"
           />
         </div>
       );
@@ -210,11 +218,10 @@ const FileMessage = ({
 
   const renderFilePreview = () => {
     const mimetype = msg.file?.mimetype || '';
-    const originalname = getDecodedFilename(msg.file?.originalname || 'Unknown File');
+    const originalname = getDecodedFilename(msg.file?.filename);
     const size = fileService.formatFileSize(msg.file?.size || 0);
 
-    console.log("✅",mimetype,originalname,size);
-    
+    console.log("✅", mimetype, originalname, size);
     
     const FileActions = () => (
       <div className="file-actions mt-2 pt-2 border-t border-gray-200">
@@ -239,10 +246,8 @@ const FileMessage = ({
       </div>
     );
 
-    const previewWrapperClass = 
-      "overflow-hidden";
-    const fileInfoClass = 
-      "flex items-center gap-3 p-1 mt-2";
+    const previewWrapperClass = "overflow-hidden";
+    const fileInfoClass = "flex items-center gap-3 p-1 mt-2";
 
     if (mimetype.startsWith('image/')) {
       return (
@@ -269,7 +274,7 @@ const FileMessage = ({
                 controls
                 preload="metadata"
                 aria-label={`${originalname} 비디오`}
-                crossOrigin="use-credentials"
+                crossOrigin="anonymous"
               >
                 <source src={previewUrl} type={mimetype} />
                 <track kind="captions" />
@@ -308,7 +313,7 @@ const FileMessage = ({
                 controls
                 preload="metadata"
                 aria-label={`${originalname} 오디오`}
-                crossOrigin="use-credentials"
+                crossOrigin="anonymous"
               >
                 <source src={previewUrl} type={mimetype} />
                 오디오를 재생할 수 없습니다.
