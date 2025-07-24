@@ -415,10 +415,10 @@ const ChatMessages = ({
         throw new Error('메시지 삭제에 실패했습니다.');
       }
 
-      // 상위 컴포넌트에 삭제 완료 알림
-      if (onMessageDelete) {
-        onMessageDelete(messageId);
-      }
+      const responseData = await response.json();
+
+      // API 응답 데이터 반환
+      return responseData;
     } catch (error) {
       console.error('Message delete error:', error);
       throw error;
