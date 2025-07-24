@@ -42,8 +42,8 @@ jobs:
             echo ".env file created from secret."
             
             # 생성된 .env 파일을 S3 버킷에 업로드합니다.
-            aws s3 cp ./.env s3://${{ env.S3_BUCKET_FOR_ENV }}/.env-backend
-            echo ".env file uploaded to s3://${{ env.S3_BUCKET_FOR_ENV }}/.env-backend"
+            aws s3 cp ./.env s3://${{ env.S3_BUCKET_FOR_ENV }}/.env-frontend
+            echo ".env file uploaded to s3://${{ env.S3_BUCKET_FOR_ENV }}/.env-frontend"
           else
             echo "Error: DOTENV_CONTENT secret is empty or not set. Skipping .env creation and upload."
             exit 1 # 비밀이 없으면 워크플로우를 실패시킬 수 있습니다.
