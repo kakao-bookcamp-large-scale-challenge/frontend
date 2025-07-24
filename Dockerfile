@@ -49,4 +49,4 @@ COPY --from=builder /app/frontend/node_modules ./node_modules
 EXPOSE 3000
 
 # 실행
-CMD ["npm", "next", "start"]
+CMD ["npm", "run", "start"]
