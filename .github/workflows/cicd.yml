@@ -71,7 +71,14 @@ jobs:
           context: .
           push: true
           tags: ${{ env.DOCKER_HUB_IMAGE_FULL_PATH }}
-          build-args: ${{ steps.env-vars.outputs.args }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+            NEXT_PUBLIC_ENCRYPTION_KEY=${{ secrets.NEXT_PUBLIC_ENCRYPTION_KEY }}
+            NEXT_PUBLIC_PASSWORD_SALT=${{ secrets.NEXT_PUBLIC_PASSWORD_SALT }}
+            NEXT_PUBLIC_AWS_ACCESS_KEY_ID=${{ secrets.NEXT_PUBLIC_AWS_ACCESS_KEY_ID }}
+            NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY=${{ secrets.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY }}
+            NEXT_PUBLIC_AWS_REGION=${{ secrets.NEXT_PUBLIC_AWS_REGION }}
+            NEXT_PUBLIC_S3_BUCKET_NAME=${{ secrets.NEXT_PUBLIC_S3_BUCKET_NAME }}
 
       - name: Generate User Data Script
         id: generate-user-data
