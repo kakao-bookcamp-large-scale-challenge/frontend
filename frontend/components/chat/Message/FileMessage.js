@@ -24,6 +24,7 @@ const FileMessage = ({
   currentUser = null,
   onReactionAdd,
   onReactionRemove,
+  onMessageDelete,
   room = null,
   messageRef,
   socketRef
@@ -393,6 +394,7 @@ const FileMessage = ({
           currentUserId={currentUser?.id}
           onReactionAdd={onReactionAdd}
           onReactionRemove={onReactionRemove}
+          onMessageDelete={onMessageDelete}
           isMine={isMine}
           room={room}
         />        
@@ -411,7 +413,8 @@ FileMessage.defaultProps = {
     }
   },
   isMine: false,
-  currentUser: null
+  currentUser: null,
+  onMessageDelete: () => {}
 };
 
 export default React.memo(FileMessage);
