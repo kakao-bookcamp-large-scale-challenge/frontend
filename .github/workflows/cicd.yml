@@ -15,7 +15,9 @@ env:
   S3_BUCKET_FOR_ENV: load-s3-env
   S3_BUCKET_NAME: load-s3-good
   CLOUDFRONT_DISTRIBUTION_ID: EEJ5ZEOXHMZ7K
+  ASG_SECURITY_GROUP_ID: sg-06011c24bf384387e
 
+  
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -133,8 +135,9 @@ jobs:
             .NetworkInterfaces = (.NetworkInterfaces // []) |
             .NetworkInterfaces[0] |= (
               . // {} |
+              .DeviceIndex = 0 | # 첫 번째 네트워크 인터페이스 (Eth0)
               .AssociatePublicIpAddress = true |
-              .DeviceIndex = 0
+              .Groups = [$ASG_SECURITY_GROUP_ID] # 보안 그룹 ID를 배열로 설정
             )
             '
           )
