@@ -51,13 +51,11 @@ jobs:
             exit 1 # 비밀이 없으면 워크플로우를 실패시킬 수 있습니다.
           fi
 
-      - name: Parse .env and set build-args
-        id: parse-env
+      - name: Parse .env and set build args
+        id: env-vars
         run: |
-          echo "build_args<<EOF" >> $GITHUB_OUTPUT
-          grep '^NEXT_PUBLIC_' .env | sed 's/^/--build-arg /' >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
+          echo "args=$(grep '^NEXT_PUBLIC_' .env | xargs)" >> $GITHUB_OUTPUT
+          
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -73,7 +71,7 @@ jobs:
           context: .
           push: true
           tags: ${{ env.DOCKER_HUB_IMAGE_FULL_PATH }}
-          build-args: ${{ steps.parse-env.outputs.build_args }}
+          build-args: ${{ steps.env-vars.outputs.args }}
 
       - name: Generate User Data Script
         id: generate-user-data
