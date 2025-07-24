@@ -14,7 +14,8 @@ const MessageActions = ({
   onReactionRemove,
   isMine,
   room,
-  onMessageDelete
+  onMessageDelete,
+  messageRef
 }) => {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [tooltipStates, setTooltipStates] = useState({});
@@ -74,14 +75,28 @@ const MessageActions = ({
   const handleDelete = useCallback(async () => {
     if (!isMine) return;
     
-    const confirmDelete = window.confirm('이 메시지를 삭제하시겠습니까?');
+    // 메시지 작성 시간 확인 (1분 = 60000ms)
+    const now = new Date();
+    const messageTime = new Date(messageRef?.timestamp || now);
+    const messageAge = now - messageTime;
+    const isOlderThanOneMinute = messageAge > 60000;
+    
+    // 삭제 확인 메시지 차별화
+    const confirmMessage = isOlderThanOneMinute ? 
+      '이 기기에서만 삭제됩니다. 삭제하시겠습니까?' : 
+      '이 메시지를 삭제하시겠습니까?';
+      
+    const confirmDelete = window.confirm(confirmMessage);
     if (!confirmDelete) return;
 
     setIsDeleting(true);
     try {
       if (onMessageDelete) {
-        await onMessageDelete(messageId);
-        Toast.success('메시지가 삭제되었습니다.');
+        const result = await onMessageDelete(messageId);
+        const successMessage = result?.deleteType === 'local' ? 
+          '이 기기에서만 삭제되었습니다.' : 
+          '메시지가 삭제되었습니다.';
+        Toast.success(successMessage);
       }
     } catch (error) {
       console.error('Message delete failed:', error);
@@ -290,18 +305,19 @@ const MessageActions = ({
       </div>
     </div>
   );
-  };
-  
-  MessageActions.defaultProps = {
-    messageId: '',
-    messageContent: '',
-    reactions: {},
-    currentUserId: null,
-    onReactionAdd: () => {},
-    onReactionRemove: () => {},
-    isMine: false,
-    room: null,
-    onMessageDelete: () => {}
-  };
-  
-  export default React.memo(MessageActions);
+};
+
+MessageActions.defaultProps = {
+  messageId: '',
+  messageContent: '',
+  reactions: {},
+  currentUserId: null,
+  onReactionAdd: () => {},
+  onReactionRemove: () => {},
+  isMine: false,
+  room: null,
+  onMessageDelete: () => {},
+  messageRef: null
+};
+
+export default React.memo(MessageActions);
