@@ -81,20 +81,21 @@ const UserMessage = ({
           onMessageDelete={onMessageDelete}
           isMine={isMine}
           room={room}
+          messageRef={msg}
         />
       </div>
     </div>
   );
-  };
-  
-  UserMessage.defaultProps = {
-    msg: {},
-    isMine: false,
-    currentUser: null,
-    onReactionAdd: () => {},
-    onReactionRemove: () => {},
+};
+
+UserMessage.defaultProps = {
+  msg: {},
+  isMine: false,
+  currentUser: null,
+  onReactionAdd: () => {},
+  onReactionRemove: () => {},
     onMessageDelete: () => {},
-    room: null
-  };
-  
-  export default React.memo(UserMessage);
+  room: null
+};
+
+export default React.memo(UserMessage);
