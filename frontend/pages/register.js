@@ -132,10 +132,18 @@ const Register = () => {
     } catch (err) {
       console.error('Registration error:', err);
       
-      if (err.response?.data?.errors) {
+      // 409 에러 (이미 존재하는 이메일)인 경우 특별 처리
+      if (err.response?.status === 409) {
+        setErrors([{ 
+          field: 'email',
+          message: err.response.data?.message || '이미 가입된 이메일입니다.'
+        }]);
+      } else if (err.response?.data?.errors) {
         setErrors(err.response.data.errors);
       } else if (err.response?.data?.message) {
         setErrors([{ message: err.response.data.message }]);
+      } else if (err.message) {
+        setErrors([{ message: err.message }]);
       } else {
         setErrors([{ message: '회원가입 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' }]);
       }
