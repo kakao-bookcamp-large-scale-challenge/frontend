@@ -61,10 +61,13 @@ jobs:
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
       - name: Build and Push Docker Image
-        run: |
-          docker build -t ${{ env.DOCKER_HUB_IMAGE_FULL_PATH }} .
-          docker push ${{ env.DOCKER_HUB_IMAGE_FULL_PATH }}
-          echo "Docker image built and pushed to Docker Hub: ${{ env.DOCKER_HUB_IMAGE_FULL_PATH }}"
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.DOCKER_HUB_IMAGE_FULL_PATH }}
+          build-args: |
+            $(cat .env | sed '/^\s*$/d' | sed 's/^/ /')
 
       - name: Generate User Data Script
         id: generate-user-data
