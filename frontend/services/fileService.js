@@ -1,4 +1,5 @@
-import axios, { isCancel, CancelToken } from 'axios';
+import { v4 as uuidv4 } from 'uuid';
+import axios from 'axios';
 import authService from './authService';
 import { Toast } from '../components/Toast';
 
@@ -10,24 +11,34 @@ class FileService {
     this.retryDelay = 1000;
     this.activeUploads = new Map();
 
+    // S3 설정
+    this.bucketName = process.env.NEXT_PUBLIC_S3_BUCKET_NAME;
+    this.region = process.env.NEXT_PUBLIC_AWS_REGION || 'ap-northeast-2';
+    this.bucketUrl = process.env.NEXT_PUBLIC_S3_BUCKET_URL || 
+                     `https://${this.bucketName}.s3.${this.region}.amazonaws.com`;
+    this.cloudFrontDomain = process.env.NEXT_PUBLIC_CLOUDFRONT_DOMAIN;
+
     this.allowedTypes = {
       image: {
         extensions: ['.jpg', '.jpeg', '.png', '.gif', '.webp'],
         mimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
         maxSize: 10 * 1024 * 1024,
-        name: '이미지'
+        name: '이미지',
+        folder: 'images'
       },
       video: {
         extensions: ['.mp4', '.webm', '.mov'],
         mimeTypes: ['video/mp4', 'video/webm', 'video/quicktime'],
         maxSize: 50 * 1024 * 1024,
-        name: '동영상'
+        name: '동영상',
+        folder: 'videos'
       },
       audio: {
         extensions: ['.mp3', '.wav', '.ogg'],
         mimeTypes: ['audio/mpeg', 'audio/wav', 'audio/ogg'],
         maxSize: 20 * 1024 * 1024,
-        name: '오디오'
+        name: '오디오',
+        folder: 'audio'
       },
       document: {
         extensions: ['.pdf', '.doc', '.docx', '.txt'],
@@ -38,7 +49,8 @@ class FileService {
           'text/plain'
         ],
         maxSize: 20 * 1024 * 1024,
-        name: '문서'
+        name: '문서',
+        folder: 'documents'
       },
       archive: {
         extensions: ['.zip', '.rar', '.7z'],
@@ -48,9 +60,17 @@ class FileService {
           'application/x-7z-compressed'
         ],
         maxSize: 50 * 1024 * 1024,
-        name: '압축파일'
+        name: '압축파일',
+        folder: 'archives'
       }
     };
+
+    console.log('FileService initialized:', {
+      bucketName: this.bucketName,
+      bucketUrl: this.bucketUrl,
+      hasCloudFront: !!this.cloudFrontDomain,
+      baseUrl: this.baseUrl
+    });
   }
 
   async validateFile(file) {
@@ -59,6 +79,12 @@ class FileService {
       Toast.error(message);
       return { success: false, message };
     }
+
+    console.log('Validating file:', {
+      name: file.name,
+      type: file.type,
+      size: file.size
+    });
 
     if (file.size > this.uploadLimit) {
       const message = `파일 크기는 ${this.formatFileSize(this.uploadLimit)}를 초과할 수 없습니다.`;
@@ -70,6 +96,7 @@ class FileService {
     let maxTypeSize = 0;
     let typeConfig = null;
 
+    // MIME 타입으로 먼저 확인
     for (const config of Object.values(this.allowedTypes)) {
       if (config.mimeTypes.includes(file.type)) {
         isAllowedType = true;
@@ -79,8 +106,30 @@ class FileService {
       }
     }
 
+    // MIME 타입으로 찾지 못한 경우 확장자로 확인
     if (!isAllowedType) {
-      const message = '지원하지 않는 파일 형식입니다.';
+      const ext = this.getFileExtension(file.name).toLowerCase();
+      for (const config of Object.values(this.allowedTypes)) {
+        if (config.extensions.includes(ext)) {
+          isAllowedType = true;
+          maxTypeSize = config.maxSize;
+          typeConfig = config;
+          console.log('File type matched by extension:', ext, 'Config:', config);
+          break;
+        }
+      }
+    }
+
+    if (!isAllowedType) {
+      const supportedTypes = Object.values(this.allowedTypes)
+        .map(config => config.name)
+        .join(', ');
+      const message = `지원하지 않는 파일 형식입니다. 지원 형식: ${supportedTypes}`;
+      console.error('Unsupported file type:', {
+        fileName: file.name,
+        fileType: file.type,
+        supportedTypes
+      });
       Toast.error(message);
       return { success: false, message };
     }
@@ -91,206 +140,273 @@ class FileService {
       return { success: false, message };
     }
 
-    const ext = this.getFileExtension(file.name);
-    if (!typeConfig.extensions.includes(ext.toLowerCase())) {
-      const message = '파일 확장자가 올바르지 않습니다.';
+    const ext = this.getFileExtension(file.name).toLowerCase();
+    if (!typeConfig.extensions.includes(ext)) {
+      const message = `${typeConfig.name} 파일의 확장자가 올바르지 않습니다. 지원 확장자: ${typeConfig.extensions.join(', ')}`;
+      console.error('Invalid file extension:', {
+        fileName: file.name,
+        fileExtension: ext,
+        supportedExtensions: typeConfig.extensions
+      });
       Toast.error(message);
       return { success: false, message };
     }
 
-    return { success: true };
+    console.log('File validation successful:', {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      typeConfig: typeConfig.name
+    });
+
+    return { success: true, typeConfig };
+  }
+
+  generateS3Key(file, typeConfig) {
+    const timestamp = Date.now();
+    const uuid = uuidv4();
+    const ext = this.getFileExtension(file.name);
+    const folder = typeConfig.folder || 'files';
+    
+    return `uploads/${folder}/${timestamp}-${uuid}${ext}`;
+  }
+
+  getS3Url(s3Key) {
+    if (this.cloudFrontDomain) {
+      return `https://${this.cloudFrontDomain}/${s3Key}`;
+    } else {
+      return `${this.bucketUrl}/${s3Key}`;
+    }
+  }
+
+  async uploadToS3(file, s3Key, onProgress) {
+    const s3Url = this.getS3Url(s3Key);
+    
+    console.log('Uploading to S3:', {
+      s3Key,
+      s3Url,
+      fileSize: file.size,
+      fileType: file.type,
+      bucketName: this.bucketName,
+      bucketUrl: this.bucketUrl
+    });
+
+    try {
+      // S3에 직접 PUT 요청 (fetch 사용)
+      const response = await fetch(s3Url, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': file.type,
+        },
+        body: file
+      });
+
+      if (!response.ok) {
+        throw new Error(`S3 upload failed: ${response.status} ${response.statusText}`);
+      }
+
+      console.log('S3 upload successful:', {
+        status: response.status,
+        s3Key,
+        s3Url
+      });
+
+      // 진행률 수동 업데이트 (fetch에서는 실시간 진행률이 어려움)
+      if (onProgress) {
+        onProgress(100);
+      }
+
+      return {
+        success: true,
+        s3Key,
+        url: s3Url,
+        etag: response.headers.get('etag')
+      };
+
+    } catch (error) {
+      console.error('S3 upload error:', error);
+      throw new Error(`S3 업로드 실패: ${error.message}`);
+    }
   }
 
   async uploadFile(file, onProgress) {
+    console.log('Starting file upload:', {
+      name: file.name,
+      type: file.type,
+      size: file.size
+    });
+
     const validationResult = await this.validateFile(file);
     if (!validationResult.success) {
+      console.error('File validation failed:', validationResult);
       return validationResult;
     }
 
     try {
       const user = authService.getCurrentUser();
       if (!user?.token || !user?.sessionId) {
-        return { 
+        const error = { 
           success: false, 
           message: '인증 정보가 없습니다.' 
         };
+        console.error('Authentication failed:', error);
+        return error;
       }
 
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const source = CancelToken.source();
-      this.activeUploads.set(file.name, source);
-
-      const uploadUrl = this.baseUrl ? 
-        `${this.baseUrl}/api/files/upload` : 
-        '/api/files/upload';
-
-      const response = await axios.post(uploadUrl, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-          'x-auth-token': user.token,
-          'x-session-id': user.sessionId
-        },
-        cancelToken: source.token,
-        withCredentials: true,
-        onUploadProgress: (progressEvent) => {
-          if (onProgress) {
-            const percentCompleted = Math.round(
-              (progressEvent.loaded * 100) / progressEvent.total
-            );
-            onProgress(percentCompleted);
-          }
-        }
-      });
-
-      this.activeUploads.delete(file.name);
-
-      if (!response.data || !response.data.success) {
-        return {
-          success: false,
-          message: response.data?.message || '파일 업로드에 실패했습니다.'
-        };
+      // S3가 설정되어 있으면 S3 업로드, 아니면 기존 방식
+      if (this.bucketName) {
+        console.log('Using S3 upload method');
+        return await this.uploadToS3Method(file, validationResult.typeConfig, onProgress);
+      } else {
+        console.log('S3 not configured, using legacy upload method');
+        return await this.uploadToLegacyMethod(file, onProgress);
       }
-
-      const fileData = response.data.file;
-      return {
-        success: true,
-        data: {
-          ...response.data,
-          file: {
-            ...fileData,
-            url: this.getFileUrl(fileData.filename, true)
-          }
-        }
-      };
 
     } catch (error) {
-      this.activeUploads.delete(file.name);
+      console.error('File upload error:', error);
       
-      if (isCancel(error)) {
+      if (error.name === 'AbortError') {
         return {
           success: false,
           message: '업로드가 취소되었습니다.'
         };
       }
 
-      if (error.response?.status === 401) {
-        try {
-          const refreshed = await authService.refreshToken();
-          if (refreshed) {
-            return this.uploadFile(file, onProgress);
-          }
-          return {
-            success: false,
-            message: '인증이 만료되었습니다. 다시 로그인해주세요.'
-          };
-        } catch (refreshError) {
-          return {
-            success: false,
-            message: '인증이 만료되었습니다. 다시 로그인해주세요.'
-          };
-        }
-      }
-
       return this.handleUploadError(error);
     }
   }
-  async downloadFile(filename, originalname) {
-    try {
-      const user = authService.getCurrentUser();
-      if (!user?.token || !user?.sessionId) {
-        return {
-          success: false,
-          message: '인증 정보가 없습니다.'
-        };
-      }
 
-      // 파일 존재 여부 먼저 확인
-      const downloadUrl = this.getFileUrl(filename, false);
-      const checkResponse = await axios.head(downloadUrl, {
-        headers: {
-          'x-auth-token': user.token,
-          'x-session-id': user.sessionId
-        },
-        validateStatus: status => status < 500,
-        withCredentials: true
-      });
+  async uploadToS3Method(file, typeConfig, onProgress) {
+    // S3에 파일 업로드
+    const s3Key = this.generateS3Key(file, typeConfig);
+    console.log('Generated S3 key:', s3Key);
+    
+    const s3UploadResult = await this.uploadToS3(file, s3Key, onProgress);
+    
+    if (!s3UploadResult.success) {
+      console.error('S3 upload failed:', s3UploadResult);
+      throw new Error('S3 업로드에 실패했습니다.');
+    }
 
-      if (checkResponse.status === 404) {
-        return {
-          success: false,
-          message: '파일을 찾을 수 없습니다.'
-        };
-      }
+    console.log('S3 upload successful:', s3UploadResult);
 
-      if (checkResponse.status === 403) {
-        return {
-          success: false,
-          message: '파일에 접근할 권한이 없습니다.'
-        };
-      }
+    // 백엔드에 메타데이터만 저장
+    const metadataPayload = {
+      s3Key: s3UploadResult.s3Key,
+      url: s3UploadResult.url,
+      originalname: file.name,
+      mimetype: file.type,
+      size: file.size,
+      etag: s3UploadResult.etag
+    };
 
-      if (checkResponse.status !== 200) {
-        return {
-          success: false,
-          message: '파일 다운로드 준비 중 오류가 발생했습니다.'
-        };
-      }
+    console.log('Sending metadata to backend:', metadataPayload);
 
-      const response = await axios({
-        method: 'GET',
-        url: downloadUrl,
-        headers: {
-          'x-auth-token': user.token,
-          'x-session-id': user.sessionId
-        },
-        responseType: 'blob',
-        timeout: 30000,
-        withCredentials: true
-      });
+    const metadataResponse = await this.saveFileMetadata(metadataPayload);
+    
+    console.log('Metadata response from backend:', metadataResponse);
 
-      const contentType = response.headers['content-type'];
-      const contentDisposition = response.headers['content-disposition'];
-      let finalFilename = originalname;
+    if (!metadataResponse.success) {
+      console.error('Metadata save failed:', metadataResponse);
+      throw new Error(metadataResponse.message || '파일 메타데이터 저장에 실패했습니다.');
+    }
 
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(
-          /filename\*=UTF-8''([^;]+)|filename="([^"]+)"|filename=([^;]+)/
-        );
-        if (filenameMatch) {
-          finalFilename = decodeURIComponent(
-            filenameMatch[1] || filenameMatch[2] || filenameMatch[3]
-          );
+    console.log('File upload completed successfully:', metadataResponse);
+
+    return {
+      success: true,
+      data: {
+        file: {
+          _id: metadataResponse.data.file._id,
+          filename: s3UploadResult.s3Key,
+          originalname: file.name,
+          mimetype: file.type,
+          size: file.size,
+          url: s3UploadResult.url,
+          s3Key: s3UploadResult.s3Key
         }
       }
+    };
+  }
 
-      const blob = new Blob([response.data], {
-        type: contentType || 'application/octet-stream'
+  async uploadToLegacyMethod(file, onProgress) {
+    // 기존 백엔드 업로드 방식
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const uploadUrl = this.baseUrl ? 
+      `${this.baseUrl}/api/files/upload` : 
+      '/api/files/upload';
+
+    const user = authService.getCurrentUser();
+
+    const response = await axios.post(uploadUrl, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+        'x-auth-token': user.token,
+        'x-session-id': user.sessionId
+      },
+      withCredentials: true,
+      onUploadProgress: (progressEvent) => {
+        if (onProgress) {
+          const percentCompleted = Math.round(
+            (progressEvent.loaded * 100) / progressEvent.total
+          );
+          onProgress(percentCompleted);
+        }
+      }
+    });
+
+    if (!response.data || !response.data.success) {
+      return {
+        success: false,
+        message: response.data?.message || '파일 업로드에 실패했습니다.'
+      };
+    }
+
+    const fileData = response.data.file;
+    return {
+      success: true,
+      data: {
+        ...response.data,
+        file: {
+          ...fileData,
+          url: this.getFileUrl(fileData.filename, true)
+        }
+      }
+    };
+  }
+
+  async saveFileMetadata(fileData) {
+    try {
+      const user = authService.getCurrentUser();
+      const saveUrl = this.baseUrl ? 
+        `${this.baseUrl}/api/files/metadata` : 
+        '/api/files/metadata';
+
+      const response = await axios.post(saveUrl, fileData, {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-auth-token': user.token,
+          'x-session-id': user.sessionId
+        },
+        withCredentials: true
       });
 
-      const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = finalFilename;
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      setTimeout(() => {
-        window.URL.revokeObjectURL(blobUrl);
-      }, 100);
-
-      return { success: true };
-
+      return response.data;
     } catch (error) {
+      console.error('Metadata save error:', error);
+      
       if (error.response?.status === 401) {
         try {
           const refreshed = await authService.refreshToken();
           if (refreshed) {
-            return this.downloadFile(filename, originalname);
+            return this.saveFileMetadata(fileData);
           }
+          return {
+            success: false,
+            message: '인증이 만료되었습니다. 다시 로그인해주세요.'
+          };
         } catch (refreshError) {
           return {
             success: false,
@@ -299,58 +415,88 @@ class FileService {
         }
       }
 
-      return this.handleDownloadError(error);
+      return {
+        success: false,
+        message: error.response?.data?.message || '메타데이터 저장에 실패했습니다.'
+      };
     }
   }
 
-  getFileUrl(filename, forPreview = false) {
-    if (!filename) return '';
-
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
-    const endpoint = forPreview ? 'view' : 'download';
-    return `${baseUrl}/api/files/${endpoint}/${filename}`;
+  async downloadFile(s3Key, originalname) {
+    try {
+      const fileUrl = this.getS3Url(s3Key);
+      
+      // 파일 다운로드를 위한 임시 링크 생성
+      const link = document.createElement('a');
+      link.href = fileUrl;
+      link.download = originalname || s3Key.split('/').pop();
+      link.target = '_blank';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      return {
+        success: true,
+        message: '다운로드가 시작되었습니다.'
+      };
+    } catch (error) {
+      console.error('Download error:', error);
+      return {
+        success: false,
+        message: '다운로드에 실패했습니다.'
+      };
+    }
   }
 
-  getPreviewUrl(file, withAuth = true) {
-    if (!file?.filename) return '';
+  openInNewTab(s3Key) {
+    try {
+      const fileUrl = this.getS3Url(s3Key);
+      window.open(fileUrl, '_blank');
+      return {
+        success: true,
+        message: '새 탭에서 파일을 열었습니다.'
+      };
+    } catch (error) {
+      console.error('Open in new tab error:', error);
+      return {
+        success: false,
+        message: '파일을 열 수 없습니다.'
+      };
+    }
+  }
 
-    const baseUrl = `${process.env.NEXT_PUBLIC_API_URL}/api/files/view/${file.filename}`;
+  cancelUpload(filename) {
+    const source = this.activeUploads.get(filename);
+    if (source) {
+      source.cancel('업로드가 사용자에 의해 취소되었습니다.');
+      this.activeUploads.delete(filename);
+      return true;
+    }
+    return false;
+  }
+
+  getFileUrl(s3Key, forPreview = false) {
+    return this.getS3Url(s3Key);
+  }
+
+  getPreviewUrl(file, withAuth = false) {
+    if (!file?.filename && !file?.s3Key) return '';
     
-    if (!withAuth) return baseUrl;
-
-    const user = authService.getCurrentUser();
-    if (!user?.token || !user?.sessionId) return baseUrl;
-
-    // URL 객체 생성 전 프로토콜 확인
-    const url = new URL(baseUrl);
-    url.searchParams.append('token', encodeURIComponent(user.token));
-    url.searchParams.append('sessionId', encodeURIComponent(user.sessionId));
-
-    return url.toString();
-  }
-
-  getFileType(filename) {
-    if (!filename) return 'unknown';
-    const ext = this.getFileExtension(filename).toLowerCase();
-    for (const [type, config] of Object.entries(this.allowedTypes)) {
-      if (config.extensions.includes(ext)) {
-        return type;
-      }
-    }
-    return 'unknown';
-  }
-
-  getFileExtension(filename) {
-    if (!filename) return '';
-    const parts = filename.split('.');
-    return parts.length > 1 ? `.${parts.pop().toLowerCase()}` : '';
+    const s3Key = file.s3Key || file.filename;
+    return this.getS3Url(s3Key);
   }
 
   formatFileSize(bytes) {
-    if (!bytes || bytes === 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return `${parseFloat((bytes / Math.pow(1024, i)).toFixed(2))} ${units[i]}`;
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+
+  getFileExtension(filename) {
+    return filename.substring(filename.lastIndexOf('.'));
   }
 
   getHeaders() {
@@ -420,117 +566,49 @@ class FileService {
     };
   }
 
-  handleDownloadError(error) {
-    console.error('Download error:', error);
-
-    if (error.code === 'ECONNABORTED') {
-      return {
-        success: false,
-        message: '파일 다운로드 시간이 초과되었습니다.'};
+  async retryUpload(file, onProgress, attempt = 1) {
+    if (attempt > this.retryAttempts) {
+      throw new Error('최대 재시도 횟수를 초과했습니다.');
     }
 
-    if (axios.isAxiosError(error)) {
-      const status = error.response?.status;
-      const message = error.response?.data?.message;
+    try {
+      return await this.uploadFile(file, onProgress);
+    } catch (error) {
+      if (attempt < this.retryAttempts) {
+        await new Promise(resolve => 
+          setTimeout(resolve, this.retryDelay * attempt)
+        );
+        return this.retryUpload(file, onProgress, attempt + 1);
+      }
+      throw error;
+    }
+  }
 
-      switch (status) {
-        case 404:
-          return {
-            success: false,
-            message: '파일을 찾을 수 없습니다.'
-          };
-        case 403:
-          return {
-            success: false,
-            message: '파일에 접근할 권한이 없습니다.'
-          };
-        case 400:
-          return {
-            success: false,
-            message: message || '잘못된 요청입니다.'
-          };
-        case 500:
-          return {
-            success: false,
-            message: '서버 오류가 발생했습니다.'
-          };
-        default:
-          return {
-            success: false,
-            message: message || '파일 다운로드에 실패했습니다.'
-          };
+  getFileTypeFromMime(mimeType) {
+    for (const [type, config] of Object.entries(this.allowedTypes)) {
+      if (config.mimeTypes.includes(mimeType)) {
+        return type;
       }
     }
-
-    return {
-      success: false,
-      message: error.message || '알 수 없는 오류가 발생했습니다.',
-      error
-    };
+    return 'unknown';
   }
 
-  cancelUpload(filename) {
-    const source = this.activeUploads.get(filename);
-    if (source) {
-      source.cancel('Upload canceled by user');
-      this.activeUploads.delete(filename);
-      return {
-        success: true,
-        message: '업로드가 취소되었습니다.'
-      };
-    }
-    return {
-      success: false,
-      message: '취소할 업로드를 찾을 수 없습니다.'
-    };
+  isImageFile(file) {
+    return this.allowedTypes.image.mimeTypes.includes(file.type || file.mimetype);
   }
 
-  cancelAllUploads() {
-    let canceledCount = 0;
-    for (const [filename, source] of this.activeUploads) {
-      source.cancel('All uploads canceled');
-      this.activeUploads.delete(filename);
-      canceledCount++;
-    }
-    
-    return {
-      success: true,
-      message: `${canceledCount}개의 업로드가 취소되었습니다.`,
-      canceledCount
-    };
+  isVideoFile(file) {
+    return this.allowedTypes.video.mimeTypes.includes(file.type || file.mimetype);
   }
 
-  getErrorMessage(status) {
-    switch (status) {
-      case 400:
-        return '잘못된 요청입니다.';
-      case 401:
-        return '인증이 필요합니다.';
-      case 403:
-        return '파일에 접근할 권한이 없습니다.';
-      case 404:
-        return '파일을 찾을 수 없습니다.';
-      case 413:
-        return '파일이 너무 큽니다.';
-      case 415:
-        return '지원하지 않는 파일 형식입니다.';
-      case 500:
-        return '서버 오류가 발생했습니다.';
-      case 503:
-        return '서비스를 일시적으로 사용할 수 없습니다.';
-      default:
-        return '알 수 없는 오류가 발생했습니다.';
-    }
+  isAudioFile(file) {
+    return this.allowedTypes.audio.mimeTypes.includes(file.type || file.mimetype);
   }
 
-  isRetryableError(error) {
-    if (!error.response) {
-      return true; // 네트워크 오류는 재시도 가능
-    }
-
-    const status = error.response.status;
-    return [408, 429, 500, 502, 503, 504].includes(status);
+  isDocumentFile(file) {
+    return this.allowedTypes.document.mimeTypes.includes(file.type || file.mimetype);
   }
 }
 
-export default new FileService();
+const fileService = new FileService();
+export default fileService;
