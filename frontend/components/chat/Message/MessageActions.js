@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { LikeIcon, CopyIcon } from '@vapor-ui/icons';
+import { LikeIcon, CopyIcon, TrashIcon } from '@vapor-ui/icons';
 import { Button, IconButton } from '@vapor-ui/core';
 import EmojiPicker from '../EmojiPicker';
 import { Toast } from '../../Toast';
@@ -12,12 +12,15 @@ const MessageActions = ({
   currentUserId,
   onReactionAdd,
   onReactionRemove,
-  isMine = false,
-  room = null
+  isMine,
+  room,
+  onMessageDelete,
+  messageRef
 }) => {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [tooltipStates, setTooltipStates] = useState({});
   const [leftOffset, setLeftOffset] = useState(0);
+  const [isDeleting, setIsDeleting] = useState(false);
   const emojiPickerRef = useRef(null);
   const emojiButtonRef = useRef(null);
   const containerRef = useRef(null);
@@ -68,6 +71,40 @@ const MessageActions = ({
       console.error('Reaction handling error:', error);
     }
   }, [messageId, reactions, currentUserId, onReactionAdd, onReactionRemove]);
+
+  const handleDelete = useCallback(async () => {
+    if (!isMine) return;
+    
+    // 메시지 작성 시간 확인 (1분 = 60000ms)
+    const now = new Date();
+    const messageTime = new Date(messageRef?.timestamp || now);
+    const messageAge = now - messageTime;
+    const isOlderThanOneMinute = messageAge > 60000;
+    
+    // 삭제 확인 메시지 차별화
+    const confirmMessage = isOlderThanOneMinute ? 
+      '이 기기에서만 삭제됩니다. 삭제하시겠습니까?' : 
+      '이 메시지를 삭제하시겠습니까?';
+      
+    const confirmDelete = window.confirm(confirmMessage);
+    if (!confirmDelete) return;
+
+    setIsDeleting(true);
+    try {
+      if (onMessageDelete) {
+        const result = await onMessageDelete(messageId);
+        const successMessage = result?.deleteType === 'local' ? 
+          '이 기기에서만 삭제되었습니다.' : 
+          '메시지가 삭제되었습니다.';
+        Toast.success(successMessage);
+      }
+    } catch (error) {
+      console.error('Message delete failed:', error);
+      Toast.error('메시지 삭제에 실패했습니다.');
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [messageId, isMine, onMessageDelete]);
 
   const toggleTooltip = useCallback((emoji) => {
     setTooltipStates(prev => ({
@@ -248,6 +285,22 @@ const MessageActions = ({
           >
             <CopyIcon size={16} />
           </IconButton>
+          {isMine && (
+            <IconButton
+              size="sm"
+              variant="outline"
+              onClick={handleDelete}
+              disabled={isDeleting}
+              aria-label="메시지 삭제"
+              style={{
+                color: 'var(--vapor-color-danger)',
+                borderColor: 'var(--vapor-color-danger-border)',
+                opacity: isDeleting ? 0.5 : 1
+              }}
+            >
+              <TrashIcon size={16} />
+            </IconButton>
+          )}
         </div>
       </div>
     </div>
@@ -262,7 +315,9 @@ MessageActions.defaultProps = {
   onReactionAdd: () => {},
   onReactionRemove: () => {},
   isMine: false,
-  room: null
+  room: null,
+  onMessageDelete: () => {},
+  messageRef: null
 };
 
 export default React.memo(MessageActions);

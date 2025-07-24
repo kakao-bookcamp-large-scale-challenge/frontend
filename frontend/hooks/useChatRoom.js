@@ -113,6 +113,161 @@ export const useChatRoom = () => {
     removeFilePreview
   } = useMessageHandling(socketRef, currentUser, router);
 
+  // 메시지 처리 유틸리티 함수 (setupEventListeners보다 먼저 정의)
+  const processMessages = useCallback((loadedMessages, hasMore, isInitialLoad = false) => {
+    try {
+      if (!Array.isArray(loadedMessages)) {
+        throw new Error('Invalid messages format');
+      }
+
+      setMessages(prev => {
+        // 중복 메시지 필터링 개선
+        const newMessages = loadedMessages.filter(msg => {
+          if (!msg._id) return false;
+          if (processedMessageIds.current.has(msg._id)) return false;
+          processedMessageIds.current.add(msg._id);
+          return true;
+        });
+
+        // 기존 메시지와 새 메시지 결합 및 정렬
+        const allMessages = [...prev, ...newMessages].sort((a, b) => {
+          return new Date(a.timestamp || 0) - new Date(b.timestamp || 0);
+        });
+
+        // 중복 제거 (가장 최근 메시지 유지)
+        const messageMap = new Map();
+        allMessages.forEach(msg => messageMap.set(msg._id, msg));
+        return Array.from(messageMap.values());
+      });
+
+      // 메시지 로드 상태 업데이트
+      if (isInitialLoad) {
+        setHasMoreMessages(hasMore);
+        initialLoadCompletedRef.current = true;
+        if (isNearBottom) {
+          requestAnimationFrame(() => scrollToBottom('auto'));
+        }
+      } else {
+        setHasMoreMessages(hasMore);
+      }
+
+    } catch (error) {
+      console.error('Message processing error:', error);
+      throw error;
+    }
+  }, [setMessages, setHasMoreMessages, isNearBottom, scrollToBottom]);
+
+  // Event listeners setup
+  const setupEventListeners = useCallback(() => {
+    if (!socketRef.current || !mountedRef.current) return;
+
+    console.log('Setting up event listeners...');
+
+    // 참가자 업데이트 이벤트
+    socketRef.current.on('participantsUpdate', (participants) => {
+      if (!mountedRef.current) return;
+      console.log('Participants updated:', participants);
+      setRoom(prev => ({
+        ...prev,
+        participants: participants || []
+      }));
+    });
+
+    // 메시지 이벤트
+    socketRef.current.on('message', message => {
+      if (!message || !mountedRef.current || messageProcessingRef.current || !message._id) return;
+      
+      if (processedMessageIds.current.has(message._id)) {
+        return;
+      }
+
+      console.log('Received message:', message);
+      processedMessageIds.current.add(message._id);
+
+      setMessages(prev => {
+        if (prev.some(msg => msg._id === message._id)) {
+          return prev;
+        }
+        return [...prev, message];
+      });
+
+      if (isNearBottom) {
+        scrollToBottom();
+      }
+    });
+
+    // 메시지 삭제 이벤트
+    socketRef.current.on('messageDeleted', (data) => {
+      if (!mountedRef.current) return;
+      console.log('Message deleted:', data);
+      
+      setMessages(prev => prev.filter(msg => msg._id !== data.messageId));
+      processedMessageIds.current.delete(data.messageId);
+    });
+
+    // 이전 메시지 이벤트
+    socketRef.current.on('previousMessages', (response) => {
+      if (!mountedRef.current || messageProcessingRef.current) return;
+      
+      try {
+        messageProcessingRef.current = true;
+        console.log('Previous messages response:', response);
+
+        if (!response || typeof response !== 'object') {
+          throw new Error('Invalid response format');
+        }
+
+        const { messages: loadedMessages = [], hasMore } = response;
+        const isInitialLoad = messages.length === 0;
+
+        processMessages(loadedMessages, hasMore, isInitialLoad);
+        setLoadingMessages(false);
+
+      } catch (error) {
+        console.error('Error processing messages:', error);
+        setLoadingMessages(false);
+        setError('메시지 처리 중 오류가 발생했습니다.');
+        setHasMoreMessages(false);
+      } finally {
+        messageProcessingRef.current = false;
+      }
+    });
+
+    setupAIMessageListeners();
+
+    // 리액션 이벤트
+    socketRef.current.on('messageReactionUpdate', (data) => {
+      if (!mountedRef.current) return;
+      // handleReactionUpdate는 나중에 정의되므로 여기서는 직접 처리
+      setMessages(prev => prev.map(msg => 
+        msg._id === data.messageId 
+          ? { ...msg, reactions: data.reactions }
+          : msg
+      ));
+    });
+
+    // 세션 이벤트
+    socketRef.current.on('session_ended', () => {
+      if (!mountedRef.current) return;
+      // cleanup은 나중에 정의되므로 여기서는 기본 처리만
+      authService.logout();
+      router.replace('/?error=session_expired');
+    });
+
+    socketRef.current.on('error', (error) => {
+      if (!mountedRef.current) return;
+      console.error('Socket error:', error);
+      setError(error.message || '채팅 연결에 문제가 발생했습니다.');
+    });
+
+  }, [isNearBottom, scrollToBottom, messages.length, processMessages, setupAIMessageListeners, setHasMoreMessages, router, setLoadingMessages, setError]);
+
+  // 메시지 삭제 핸들러
+  const handleMessageDelete = useCallback((messageId) => {
+    setMessages(prev => prev.filter(msg => msg._id !== messageId));
+    processedMessageIds.current.delete(messageId);
+  }, []);
+
   // Cleanup 함수 수정
   const cleanup = useCallback((reason = 'MANUAL') => {
     if (!mountedRef.current || !router.query.room) return;
@@ -136,6 +291,7 @@ export const useChatRoom = () => {
       if (socketRef.current && reason !== 'RECONNECT') {
         console.log('[Chat] Cleaning up socket listeners...');
         socketRef.current.off('message');
+        socketRef.current.off('messageDeleted');
         socketRef.current.off('previousMessages');
         socketRef.current.off('previousMessagesLoaded');
         socketRef.current.off('participantsUpdate');
@@ -210,49 +366,7 @@ export const useChatRoom = () => {
     handleReactionUpdate
   } = useReactionHandling(socketRef, currentUser, messages, setMessages);
 
-  // 메시지 처리 유틸리티 함수
-  const processMessages = useCallback((loadedMessages, hasMore, isInitialLoad = false) => {
-    try {
-      if (!Array.isArray(loadedMessages)) {
-        throw new Error('Invalid messages format');
-      }
 
-      setMessages(prev => {
-        // 중복 메시지 필터링 개선
-        const newMessages = loadedMessages.filter(msg => {
-          if (!msg._id) return false;
-          if (processedMessageIds.current.has(msg._id)) return false;
-          processedMessageIds.current.add(msg._id);
-          return true;
-        });
-
-        // 기존 메시지와 새 메시지 결합 및 정렬
-        const allMessages = [...prev, ...newMessages].sort((a, b) => {
-          return new Date(a.timestamp || 0) - new Date(b.timestamp || 0);
-        });
-
-        // 중복 제거 (가장 최근 메시지 유지)
-        const messageMap = new Map();
-        allMessages.forEach(msg => messageMap.set(msg._id, msg));
-        return Array.from(messageMap.values());
-      });
-
-      // 메시지 로드 상태 업데이트
-      if (isInitialLoad) {
-        setHasMoreMessages(hasMore);
-        initialLoadCompletedRef.current = true;
-        if (isNearBottom) {
-          requestAnimationFrame(() => scrollToBottom('auto'));
-        }
-      } else {
-        setHasMoreMessages(hasMore);
-      }
-
-    } catch (error) {
-      console.error('Message processing error:', error);
-      throw error;
-    }
-  }, [setMessages, setHasMoreMessages, isNearBottom, scrollToBottom]);
 
   // 이전 메시지 로드 함수
   const loadPreviousMessages = useCallback(async () => {
@@ -302,97 +416,6 @@ export const useChatRoom = () => {
       }
     }
   }, [socketRef, router?.query?.room, loadingMessages, messages, processMessages, setHasMoreMessages]);
-
-  // Event listeners setup
-  const setupEventListeners = useCallback(() => {
-    if (!socketRef.current || !mountedRef.current) return;
-
-    console.log('Setting up event listeners...');
-
-    // 참가자 업데이트 이벤트
-    socketRef.current.on('participantsUpdate', (participants) => {
-      if (!mountedRef.current) return;
-      console.log('Participants updated:', participants);
-      setRoom(prev => ({
-        ...prev,
-        participants: participants || []
-      }));
-    });
-
-    // 메시지 이벤트
-    socketRef.current.on('message', message => {
-      if (!message || !mountedRef.current || messageProcessingRef.current || !message._id) return;
-      
-      if (processedMessageIds.current.has(message._id)) {
-        return;
-      }
-
-      console.log('Received message:', message);
-      processedMessageIds.current.add(message._id);
-
-      setMessages(prev => {
-        if (prev.some(msg => msg._id === message._id)) {
-          return prev;
-        }
-        return [...prev, message];
-      });
-
-      if (isNearBottom) {
-        scrollToBottom();
-      }
-    });
-
-    // 이전 메시지 이벤트
-    socketRef.current.on('previousMessages', (response) => {
-      if (!mountedRef.current || messageProcessingRef.current) return;
-      
-      try {
-        messageProcessingRef.current = true;
-        console.log('Previous messages response:', response);
-
-        if (!response || typeof response !== 'object') {
-          throw new Error('Invalid response format');
-        }
-
-        const { messages: loadedMessages = [], hasMore } = response;
-        const isInitialLoad = messages.length === 0;
-
-        processMessages(loadedMessages, hasMore, isInitialLoad);
-        setLoadingMessages(false);
-
-      } catch (error) {
-        console.error('Error processing messages:', error);
-        setLoadingMessages(false);
-        setError('메시지 처리 중 오류가 발생했습니다.');
-        setHasMoreMessages(false);
-      } finally {
-        messageProcessingRef.current = false;
-      }
-    });
-
-    setupAIMessageListeners();
-
-    // 리액션 이벤트
-    socketRef.current.on('messageReactionUpdate', (data) => {
-      if (!mountedRef.current) return;
-      handleReactionUpdate(data);
-    });
-
-    // 세션 이벤트
-    socketRef.current.on('session_ended', () => {
-      if (!mountedRef.current) return;
-      cleanup();
-      authService.logout();
-      router.replace('/?error=session_expired');
-    });
-
-    socketRef.current.on('error', (error) => {
-      if (!mountedRef.current) return;
-      console.error('Socket error:', error);
-      setError(error.message || '채팅 연결에 문제가 발생했습니다.');
-    });
-
-  }, [isNearBottom, scrollToBottom, messages.length, processMessages, setupAIMessageListeners, setHasMoreMessages, cleanup, router, handleReactionUpdate, setLoadingMessages, setError]);
 
   // Room handling hook initialization
   const {
@@ -624,6 +647,7 @@ export const useChatRoom = () => {
     removeFilePreview,
     handleReactionAdd,
     handleReactionRemove,
+    handleMessageDelete,
     cleanup,
     
     // Setters

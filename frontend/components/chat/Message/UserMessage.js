@@ -6,12 +6,13 @@ import ReadStatus from '../ReadStatus';
 import { generateColorFromEmail, getContrastTextColor } from '../../../utils/colorUtils';
 
 const UserMessage = ({
-  msg = {}, 
-  isMine = false, 
-  currentUser = null,
+  msg, 
+  isMine, 
+  currentUser,
   onReactionAdd,
   onReactionRemove,
-  room = null,
+  onMessageDelete,
+  room,
   messageRef,
   socketRef
 }) => {
@@ -77,8 +78,10 @@ const UserMessage = ({
           currentUserId={currentUser?.id}
           onReactionAdd={onReactionAdd}
           onReactionRemove={onReactionRemove}
+          onMessageDelete={onMessageDelete}
           isMine={isMine}
           room={room}
+          messageRef={msg}
         />
       </div>
     </div>
@@ -91,6 +94,7 @@ UserMessage.defaultProps = {
   currentUser: null,
   onReactionAdd: () => {},
   onReactionRemove: () => {},
+    onMessageDelete: () => {},
   room: null
 };
 
