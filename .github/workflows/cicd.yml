@@ -57,8 +57,8 @@ jobs:
             echo "${{ secrets.DOTENV_CONTENT }}" > ./.env
             echo ".env file created from secret."
           if [ -f ./.env ]; then
-            aws s3 cp ./.env s3://${{ env.S3_BUCKET_FOR_ENV }}/.env
-            echo ".env file uploaded to s3://${{ env.S3_BUCKET_FOR_ENV }}/.env"
+            aws s3 cp ./.env s3://${{ env.S3_BUCKET_FOR_ENV }}/.env-frontend
+            echo ".env file uploaded to s3://${{ env.S3_BUCKET_FOR_ENV }}/.env-frontend"
           else
             echo "Warning: .env file not found in repository root. Skipping .env upload."
           fi
@@ -82,7 +82,7 @@ jobs:
           # Docker 이미지 Pull
           docker pull ${{ env.DOCKER_HUB_IMAGE_FULL_PATH }}
 
-          if aws s3 cp s3://${{ env.S3_BUCKET_FOR_ENV }}/.env /tmp/.env; then
+          if aws s3 cp s3://${{ env.S3_BUCKET_FOR_ENV }}/.env-frontend /tmp/.env; then
             echo ".env file downloaded successfully."
             ENV_FILE_OPTION="--env-file /tmp/.env"
           else
