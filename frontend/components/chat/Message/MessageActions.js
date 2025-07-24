@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { LikeIcon, CopyIcon } from '@vapor-ui/icons';
+import { LikeIcon, CopyIcon, TrashIcon } from '@vapor-ui/icons';
 import { Button, IconButton } from '@vapor-ui/core';
 import EmojiPicker from '../EmojiPicker';
 import { Toast } from '../../Toast';
@@ -12,12 +12,14 @@ const MessageActions = ({
   currentUserId,
   onReactionAdd,
   onReactionRemove,
-  isMine = false,
-  room = null
+  isMine,
+  room,
+  onMessageDelete
 }) => {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [tooltipStates, setTooltipStates] = useState({});
   const [leftOffset, setLeftOffset] = useState(0);
+  const [isDeleting, setIsDeleting] = useState(false);
   const emojiPickerRef = useRef(null);
   const emojiButtonRef = useRef(null);
   const containerRef = useRef(null);
@@ -68,6 +70,26 @@ const MessageActions = ({
       console.error('Reaction handling error:', error);
     }
   }, [messageId, reactions, currentUserId, onReactionAdd, onReactionRemove]);
+
+  const handleDelete = useCallback(async () => {
+    if (!isMine) return;
+    
+    const confirmDelete = window.confirm('이 메시지를 삭제하시겠습니까?');
+    if (!confirmDelete) return;
+
+    setIsDeleting(true);
+    try {
+      if (onMessageDelete) {
+        await onMessageDelete(messageId);
+        Toast.success('메시지가 삭제되었습니다.');
+      }
+    } catch (error) {
+      console.error('Message delete failed:', error);
+      Toast.error('메시지 삭제에 실패했습니다.');
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [messageId, isMine, onMessageDelete]);
 
   const toggleTooltip = useCallback((emoji) => {
     setTooltipStates(prev => ({
@@ -248,21 +270,38 @@ const MessageActions = ({
           >
             <CopyIcon size={16} />
           </IconButton>
+          {isMine && (
+            <IconButton
+              size="sm"
+              variant="outline"
+              onClick={handleDelete}
+              disabled={isDeleting}
+              aria-label="메시지 삭제"
+              style={{
+                color: 'var(--vapor-color-danger)',
+                borderColor: 'var(--vapor-color-danger-border)',
+                opacity: isDeleting ? 0.5 : 1
+              }}
+            >
+              <TrashIcon size={16} />
+            </IconButton>
+          )}
         </div>
       </div>
     </div>
   );
-};
-
-MessageActions.defaultProps = {
-  messageId: '',
-  messageContent: '',
-  reactions: {},
-  currentUserId: null,
-  onReactionAdd: () => {},
-  onReactionRemove: () => {},
-  isMine: false,
-  room: null
-};
-
-export default React.memo(MessageActions);
+  };
+  
+  MessageActions.defaultProps = {
+    messageId: '',
+    messageContent: '',
+    reactions: {},
+    currentUserId: null,
+    onReactionAdd: () => {},
+    onReactionRemove: () => {},
+    isMine: false,
+    room: null,
+    onMessageDelete: () => {}
+  };
+  
+  export default React.memo(MessageActions);
