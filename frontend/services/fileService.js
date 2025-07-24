@@ -426,15 +426,26 @@ class FileService {
     try {
       const fileUrl = this.getS3Url(s3Key);
       
-      // 파일 다운로드를 위한 임시 링크 생성
+      console.log('Attempting to download file from S3:', { s3Key, fileUrl, originalname });
+
+      const response = await fetch(fileUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch file: ${response.status} ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
       const link = document.createElement('a');
-      link.href = fileUrl;
-      link.download = originalname || s3Key.split('/').pop();
-      link.target = '_blank';
-      
+      link.href = blobUrl;
+      link.download = originalname || s3Key.split('/').pop(); // 원본 파일명 또는 S3 키에서 추출
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+
+      URL.revokeObjectURL(blobUrl); // 임시 URL 해제
+
+      console.log('File download initiated successfully:', { s3Key, originalname });
       
       return {
         success: true,
@@ -442,9 +453,10 @@ class FileService {
       };
     } catch (error) {
       console.error('Download error:', error);
+      Toast.error(`다운로드에 실패했습니다: ${error.message}`);
       return {
         success: false,
-        message: '다운로드에 실패했습니다.'
+        message: `다운로드에 실패했습니다: ${error.message}`
       };
     }
   }
