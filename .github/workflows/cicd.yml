@@ -35,17 +35,18 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Upload .env file to S3
+      - name: Create .env file from Secret and Upload to S3
         run: |
-          # 이 파일은 워크플로우 런너에서만 임시로 존재합니다.
           if [ -n "${{ secrets.DOTENV_CONTENT }}" ]; then
             echo "${{ secrets.DOTENV_CONTENT }}" > ./.env
             echo ".env file created from secret."
-          if [ -f ./.env ]; then
-            aws s3 cp ./.env s3://${{ env.S3_BUCKET_FOR_ENV }}/.env-frontend
-            echo ".env file uploaded to s3://${{ env.S3_BUCKET_FOR_ENV }}/.env-frontend"
+            
+            # 생성된 .env 파일을 S3 버킷에 업로드합니다.
+            aws s3 cp ./.env s3://${{ env.S3_BUCKET_FOR_ENV }}/.env-backend
+            echo ".env file uploaded to s3://${{ env.S3_BUCKET_FOR_ENV }}/.env-backend"
           else
-            echo "Warning: .env file not found in repository root. Skipping .env upload."
+            echo "Error: DOTENV_CONTENT secret is empty or not set. Skipping .env creation and upload."
+            exit 1 # 비밀이 없으면 워크플로우를 실패시킬 수 있습니다.
           fi
 
       - name: Set up Docker Buildx
