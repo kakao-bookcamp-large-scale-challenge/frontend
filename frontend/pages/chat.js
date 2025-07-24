@@ -47,6 +47,7 @@ const ChatPage = () => {
     error,
     handleReactionAdd,
     handleReactionRemove,
+    handleMessageDelete,
     loadingMessages,
     hasMoreMessages,
     handleLoadMore
@@ -200,6 +201,7 @@ const ChatPage = () => {
         messagesEndRef={messagesEndRef}
         onReactionAdd={handleReactionAdd}
         onReactionRemove={handleReactionRemove}
+        onMessageDelete={handleMessageDelete}
         loadingMessages={loadingMessages}
         hasMoreMessages={hasMoreMessages}
         onLoadMore={handleLoadMore}
