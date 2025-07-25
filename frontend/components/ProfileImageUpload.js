@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { CameraIcon, CloseOutlineIcon } from '@vapor-ui/icons';
 import { Button, Text, Callout, IconButton } from '@vapor-ui/core';
 import authService from '../services/authService';
+import fileService from '../services/fileService';
 import PersistentAvatar from './common/PersistentAvatar';
 
 const ProfileImageUpload = ({ currentImage, onImageChange }) => {
@@ -52,36 +53,24 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
         throw new Error('인증 정보가 없습니다.');
       }
 
-      // FormData 생성
-      const formData = new FormData();
-      formData.append('profileImage', file);
+      // 파일 업로드 요청 (fileService를 통해 S3에 직접 업로드)
+      const uploadResult = await fileService.uploadFile(file);
 
-      // 파일 업로드 요청
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/users/profile-image`, {
-        method: 'POST',
-        headers: {
-          'x-auth-token': user.token,
-          'x-session-id': user.sessionId
-        },
-        body: formData
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || '이미지 업로드에 실패했습니다.');
+      if (!uploadResult.success) {
+        throw new Error(uploadResult.message || '이미지 업로드에 실패했습니다.');
       }
 
-      const data = await response.json();
+      const imageUrl = uploadResult.data.file.url; // S3 URL
       
       // 로컬 스토리지의 사용자 정보 업데이트
       const updatedUser = {
         ...user,
-        profileImage: data.imageUrl
+        profileImage: imageUrl
       };
       localStorage.setItem('user', JSON.stringify(updatedUser));
 
       // 부모 컴포넌트에 변경 알림
-      onImageChange(data.imageUrl);
+      onImageChange(imageUrl);
 
       // 전역 이벤트 발생
       window.dispatchEvent(new Event('userProfileUpdate'));
