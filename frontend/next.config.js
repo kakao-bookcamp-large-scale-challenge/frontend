@@ -12,7 +12,9 @@ const nextConfig = {
     experimental: {
       forceSwcTransforms: true
     }
-  })
+  }),
+  
+    output: 'export',
 };
 
 module.exports = nextConfig;
